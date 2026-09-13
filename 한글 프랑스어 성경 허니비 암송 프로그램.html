@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HoneyBee V4 - 반복 완전수정</title>
+<style>
+ body{font-family:sans-serif; background:#fdf6e3; padding:12px; text-align:center}
+.card{background:white; border-radius:22px; padding:18px; max-width:600px; margin:auto; box-shadow:0 12px 30px rgba(0,0,0,.1)}
+.big{width:94%; min-height:60px; border-radius:12px; padding:10px; border:2px solid #ddd; margin:6px 0}
+.phrase{padding:10px; border-radius:12px; margin:8px 0; background:#fff; border:2px solid #eee; text-align:left; cursor:pointer; position:relative}
+.phrase.active{background:#111; color:white; transform:scale(1.02)}
+.phrase.done{border-color:#4caf50; background:#e8f5e9}
+.count{position:absolute; right:10px; top:8px; font-size:11px; background:#ff9500; color:white; padding:2px 8px; border-radius:10px}
+ button{padding:12px 16px; border-radius:12px; border:0; background:#111; color:white; font-weight:700; margin:3px; cursor:pointer}
+.ghost{background:#eee; color:#333}
+.controls{position:sticky; bottom:6px; background:white; padding:12px; border-radius:16px; box-shadow:0 -8px 20px rgba(0,0,0,.12)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>🐝 HoneyBee V4 - 반복 수정</h2>
+  <small>마디별 3회 반복 + 누적 복습 = 규장 공식 방식</small>
+
+  <textarea id="krInput" class="big" style="border-color:#2b5cff">하나님이 세상을 이처럼 사랑하사 독생자를 주셨으니 이는 그를 믿는 자마다 멸망하지 않고 영생을 얻게 하려 하심이라</textarea>
+  <textarea id="frInput" class="big" style="border-color:#ff9500">Car Dieu a tant aimé le monde qu'il a donné son Fils unique, afin que quiconque croit en lui ne périsse point, mais qu'il ait la vie éternelle.</textarea>
+
+  <div>
+    <button onclick="parse()">✂️ 마디 나누기</button>
+    <select id="repeat"><option value="3" selected>3회 반복 (허니비 기본)</option><option value="2">2회</option><option value="5">5회</option></select>
+    <label><input type="checkbox" id="cumul" checked> 누적 복습 ON</label>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="controls">
+    <div id="status" style="font-weight:800">마디를 나눠주세요</div>
+    <div style="margin-top:8px">
+      <button onclick="start()" style="background:#2b5cff">▶️ 허니비 시작</button>
+      <button class="ghost" onclick="stop()">⏹️ 정지</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let phrasesKR=[], phrasesFR=[], isPlaying=false, current=0, rep=0;
+let synth=window.speechSynthesis;
+
+// V3에서 고친 한글 마디 나누기 그대로 사용
+function splitKR(txt){
+  let parts = txt.split(/(?<=[.!?。])\s+|(?<=[,;])\s*/).map(s=>s.trim()).filter(Boolean);
+  let result=[];
+  for(let p of parts){
+    if(p.length>20){
+      let sub=p.split(/(?<=사)\s+|(?<=니)\s+|(?<=며)\s+|(?<=고)\s+|(?<=라)\s+|(?<=다)\s+/g);
+      for(let s of sub){
+        if(s.length>18){ result.push(...s.split(/(?<=은)\s+|(?<=는)\s+|(?<=을)\s+|(?<=를)\s+/g)); }
+        else result.push(s);
+      }
+    } else result.push(p);
+  }
+  return result.map(t=>t.trim()).filter(t=>t.length>1);
+}
+function splitFR(txt){ return txt.split(/(?<=[,;:.!?])\s+/).map(s=>s.trim()).filter(s=>s.length>2); }
+
+function parse(){
+  phrasesKR=splitKR(document.getElementById('krInput').value);
+  phrasesFR=splitFR(document.getElementById('frInput').value);
+  let len=Math.max(phrasesKR.length, phrasesFR.length);
+  let html="";
+  for(let i=0;i<len;i++){
+    html+=`<div class="phrase" id="p-${i}" onclick="playOne(${i})"><span class="count" id="c-${i}">0회</span><b>${i+1}. ${phrasesKR[i]||""}</b><br><span style="color:#ff9500">${phrasesFR[i]||""}</span></div>`;
+  }
+  document.getElementById('list').innerHTML=html;
+  document.getElementById('status').innerText=`총 ${len}마디 준비 - 허니비 3회 반복으로 시작`;
+}
+
+function speak(text, lang, cb){
+  if(synth.speaking) synth.cancel();
+  let u=new SpeechSynthesisUtterance(text);
+  u.lang=lang; u.rate=0.9; u.onend=cb;
+  synth.speak(u);
+}
+function highlight(i){
+  document.querySelectorAll('.phrase').forEach(e=>e.classList.remove('active'));
+  let el=document.getElementById(`p-${i}`);
+  if(el){ el.classList.add('active'); el.scrollIntoView({behavior:'smooth', block:'center'}); }
+}
+function updateCount(i, r, target){
+  let c=document.getElementById(`c-${i}`);
+  if(c) c.innerText=`${r}/${target}회`;
+  if(r>=target){ document.getElementById(`p-${i}`)?.classList.add('done'); }
+}
+
+function playOne(i){ stop(); current=i; rep=0; highlight(i); speak(phrasesKR[i]||phrasesFR[i], 'ko-KR', ()=>{}); }
+
+// === 핵심 수정: 허니비 반복 로직 ===
+function start(){
+  if(phrasesKR.length===0) parse();
+  isPlaying=true; current=0; rep=0;
+  step();
+}
+
+function step(){
+  if(!isPlaying) return;
+  let total=Math.max(phrasesKR.length, phrasesFR.length);
+  let target=parseInt(document.getElementById('repeat').value);
+  if(current>=total){ document.getElementById('status').innerText="🎉 전체 암송 완료!"; isPlaying=false; return; }
+
+  highlight(current);
+  let kr=phrasesKR[current]||"", fr=phrasesFR[current]||"";
+  rep++;
+  updateCount(current, rep, target);
+  document.getElementById('status').innerText=`${current+1}/${total} 마디 - ${rep}/${target}회 반복 중: ${kr.slice(0,15)}...`;
+
+  // 1. 한글 → 2. 프랑스어 같은 마디를 한 세트로 반복
+  speak(kr, 'ko-KR', ()=>{
+    setTimeout(()=>{ speak(fr, 'fr-FR', ()=>{
+      if(rep < target){
+        // 같은 마디 다시 반복
+        setTimeout(step, 500);
+      } else {
+        // 누적 복습
+        if(document.getElementById('cumul').checked && current>0){
+          let cumulKR=phrasesKR.slice(0, current+1).join(" ");
+          let cumulFR=phrasesFR.slice(0, current+1).join(" ");
+          document.getElementById('status').innerText=`🔁 누적 복습 1~${current+1}마디`;
+          speak(cumulKR, 'ko-KR', ()=>{
+            speak(cumulFR, 'fr-FR', ()=>{
+              current++; rep=0; setTimeout(step, 700);
+            });
+          });
+        } else {
+          current++; rep=0; setTimeout(step, 700);
+        }
+      }
+    }); }, 300);
+  });
+}
+
+function stop(){ isPlaying=false; synth.cancel(); document.getElementById('status').innerText="정지됨"; }
+parse();
+</script>
+</body>
+</html>
